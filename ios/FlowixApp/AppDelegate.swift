@@ -4,14 +4,19 @@ import React
 @main
 class AppDelegate: UIResponder, UIApplicationDelegate, RCTBridgeDelegate {
   var window: UIWindow?
-  var bridge: RCTBridge!
+  var bridge: RCTBridge?
 
   func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
-    // Создаем bridge с delegate - это автоматически зарегистрирует все модули через autolinking
-    bridge = RCTBridge(delegate: self, launchOptions: launchOptions)
+    // Создаем bridge асинхронно - это правильно зарегистрирует все модули через autolinking
+    bridge = RCTBridge(delegate: self, launchOptions: launchOptions)!
+    
+    // Дожидаемся инициализации bridge
+    if bridge == nil {
+      return false
+    }
     
     let rootView = RCTRootView(
       bridge: bridge!,
@@ -33,12 +38,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate, RCTBridgeDelegate {
   
   // MARK: - RCTBridgeDelegate
   
-  func sourceURL(for bridge: RCTBridge!) -> URL! {
+  func sourceURL(for bridge: RCTBridge?) -> URL? {
     #if DEBUG
     return RCTBundleURLProvider.sharedSettings().jsBundleURL(forBundleRoot: "index") ?? 
-           URL(string: "http://localhost:8082/index.bundle?platform=ios")!
+           URL(string: "http://localhost:8082/index.bundle?platform=ios")
     #else
-    return Bundle.main.url(forResource: "main", withExtension: "jsbundle")!
+    return Bundle.main.url(forResource: "main", withExtension: "jsbundle")
     #endif
   }
 }
