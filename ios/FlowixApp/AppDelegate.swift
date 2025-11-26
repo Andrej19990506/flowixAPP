@@ -12,11 +12,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
   ) -> Bool {
     let jsCodeLocation: URL
 
-    #if DEBUG
-    jsCodeLocation = RCTBundleURLProvider.sharedSettings().jsBundleURL(forBundleRoot: "index")
-    #else
-    jsCodeLocation = Bundle.main.url(forResource: "main", withExtension: "jsbundle")!
-    #endif
+    // Используем production bundle (не нужен Metro bundler)
+    if let bundleURL = Bundle.main.url(forResource: "main", withExtension: "jsbundle") {
+      jsCodeLocation = bundleURL
+    } else {
+      // Fallback: пытаемся подключиться к Metro только если bundle нет
+      // Но лучше собрать bundle заранее
+      jsCodeLocation = RCTBundleURLProvider.sharedSettings().jsBundleURL(forBundleRoot: "index") ?? 
+                      URL(string: "http://localhost:8082/index.bundle?platform=ios")!
+    }
 
     let rootView = RCTRootView(bundleURL: jsCodeLocation, moduleName: "FlowixApp", initialProperties: nil, launchOptions: launchOptions)
     
