@@ -2,7 +2,7 @@ import UIKit
 import React
 
 @main
-class AppDelegate: UIResponder, UIApplicationDelegate {
+class AppDelegate: UIResponder, UIApplicationDelegate, RCTBridgeDelegate {
   var window: UIWindow?
   var bridge: RCTBridge!
 
@@ -10,19 +10,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
-    let jsCodeLocation: URL
-
-    // Используем production bundle (не нужен Metro bundler)
-    if let bundleURL = Bundle.main.url(forResource: "main", withExtension: "jsbundle") {
-      jsCodeLocation = bundleURL
-    } else {
-      // Fallback: пытаемся подключиться к Metro только если bundle нет
-      // Но лучше собрать bundle заранее
-      jsCodeLocation = RCTBundleURLProvider.sharedSettings().jsBundleURL(forBundleRoot: "index") ?? 
-                      URL(string: "http://localhost:8082/index.bundle?platform=ios")!
-    }
-
-    let rootView = RCTRootView(bundleURL: jsCodeLocation, moduleName: "FlowixApp", initialProperties: nil, launchOptions: launchOptions)
+    // Создаем bridge с delegate - это автоматически зарегистрирует все модули через autolinking
+    bridge = RCTBridge(delegate: self, launchOptions: launchOptions)
+    
+    let rootView = RCTRootView(
+      bridge: bridge!,
+      moduleName: "FlowixApp",
+      initialProperties: nil
+    )
+    
+    rootView.backgroundColor = UIColor.white
     
     let rootViewController = UIViewController()
     rootViewController.view = rootView
@@ -32,5 +29,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     window?.makeKeyAndVisible()
     
     return true
+  }
+  
+  // MARK: - RCTBridgeDelegate
+  
+  func sourceURL(for bridge: RCTBridge!) -> URL! {
+    #if DEBUG
+    return RCTBundleURLProvider.sharedSettings().jsBundleURL(forBundleRoot: "index") ?? 
+           URL(string: "http://localhost:8082/index.bundle?platform=ios")!
+    #else
+    return Bundle.main.url(forResource: "main", withExtension: "jsbundle")!
+    #endif
   }
 }
