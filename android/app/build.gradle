@@ -72,19 +72,82 @@ def enableProguardInReleaseBuilds = false
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+def newArchEnabled = project.hasProperty("newArchEnabled") && project.newArchEnabled == "true"
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
     namespace "com.flowix.app"
+    
+    // Отключаем lint для release сборки (решает проблему с занятым файлом)
+    lintOptions {
+        checkReleaseBuilds false
+        abortOnError false
+    }
     defaultConfig {
         applicationId "com.flowix.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0"
+        // Значение по умолчанию для usesCleartextTraffic
+        manifestPlaceholders = [usesCleartextTraffic: "true"]
+        
+        buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", newArchEnabled.toString()
+        buildConfigField "boolean", "IS_HERMES_ENABLED", (findProperty("hermesEnabled") ?: "true").toString()
+        
+        // abiFilters будут определены в buildTypes для каждого типа сборки отдельно
+        
+        if (newArchEnabled) {
+            externalNativeBuild {
+                cmake {
+                    arguments "-DANDROID_STL=c++_shared"
+                    // Используем короткие пути для Windows (избегаем проблемы с длинными путями >260 символов)
+                    arguments "-DCMAKE_OBJECT_PATH_MAX=200"
+                    // Используем короткие пути для промежуточных файлов
+                    arguments "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=${project.buildDir}/intermediates/cmake"
+                }
+            }
+        }
     }
+    
+    buildFeatures {
+        prefab true
+        buildConfig true
+    }
+    
+    if (newArchEnabled) {
+        externalNativeBuild {
+            cmake {
+                path file("../../node_modules/react-native/ReactAndroid/cmake-utils/default-app-setup/CMakeLists.txt")
+                // Используем короткий путь для build директории (как в ZephyrMessenger)
+                // Это решает проблему с длинными путями в CMake на Windows
+                buildStagingDirectory = file("C:/tmp/cmake-build")
+            }
+        }
+    }
+    
+    // Загружаем свойства keystore из файла (если существует)
+    def keystorePropertiesFile = rootProject.file("keystore.properties")
+    def keystoreProperties = new Properties()
+    def releaseKeystoreExists = false
+    def keystoreFile = null
+    if (keystorePropertiesFile.exists()) {
+        keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+        def storeFileValue = keystoreProperties['storeFile']
+        if (storeFileValue) {
+            keystoreFile = new File(rootProject.projectDir, storeFileValue)
+            releaseKeystoreExists = keystoreFile.exists() && keystoreFile.isFile()
+            if (releaseKeystoreExists) {
+                println "Using release keystore: ${keystoreFile.absolutePath}"
+            } else {
+                println "WARNING: Release keystore file not found at: ${keystoreFile.absolutePath}"
+            }
+        }
+    }
+    
     signingConfigs {
         debug {
             storeFile file('debug.keystore')
@@ -92,17 +155,56 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            if (releaseKeystoreExists && keystoreFile != null) {
+                // Используем release keystore если файл существует
+                def absoluteKeystorePath = keystoreFile.getAbsolutePath()
+                println "Setting release keystore to: ${absoluteKeystorePath}"
+                storeFile file(absoluteKeystorePath)
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            } else {
+                // Fallback на debug keystore если release не найден
+                println "WARNING: Release keystore not found, using debug keystore for release build"
+                storeFile file('debug.keystore')
+                storePassword 'android'
+                keyAlias 'androiddebugkey'
+                keyPassword 'android'
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
+            // Разрешить cleartext трафик для debug (HTTP без SSL)
+            manifestPlaceholders = [usesCleartextTraffic: "true"]
+            // Для debug добавляем x86_64 для поддержки эмулятора
+            ndk {
+                abiFilters "arm64-v8a", "x86_64"
+            }
+            // Исключаем react-native-vision-camera из debug сборки (используем нативный QR-сканер)
+            packagingOptions {
+                exclude '**/libVisionCamera.so'
+            }
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            // Всегда используем release signingConfig (он содержит либо release, либо debug keystore)
+            signingConfig signingConfigs.release
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+            // Запретить cleartext трафик для release (только HTTPS)
+            manifestPlaceholders = [usesCleartextTraffic: "false"]
+            // Для release используем только arm64-v8a (реальные устройства)
+            ndk {
+                abiFilters "arm64-v8a"
+            }
+            
+            // Исключаем react-native-vision-camera из release сборки (используем нативный QR-сканер)
+            packagingOptions {
+                exclude '**/libc++_shared.so'
+                exclude '**/libreactnativejni.so'
+            }
         }
     }
 }
@@ -116,4 +218,17 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+    
+    // ML Kit Barcode Scanner для QR-сканера
+    implementation 'com.google.mlkit:barcode-scanning:17.3.0'
+    
+    // CameraX для нативного QR-сканера
+    def camerax_version = "1.5.0-alpha03"
+    implementation "androidx.camera:camera-core:${camerax_version}"
+    implementation "androidx.camera:camera-camera2:${camerax_version}"
+    implementation "androidx.camera:camera-lifecycle:${camerax_version}"
+    implementation "androidx.camera:camera-view:${camerax_version}"
 }
+
+// Настройка для react-native-vector-icons
+apply from: file("../../node_modules/react-native-vector-icons/fonts.gradle")
